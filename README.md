@@ -12,6 +12,8 @@
 
 📢 Oustanding Paper Award @ ICML 2025
 
+#### News: You can now train CollabLLM on [verl](https://verl.readthedocs.io/en/latest/algo/collabllm.html)! 😄
+
 # Overview
 CollabLLM transforms traditional language models from passive responders to active collaborators in multi-turn conversations. This repository provides the complete framework for computing multiturn-aware rewards and training collaborative language models.
 
