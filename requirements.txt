@@ -230,3 +230,4 @@ xgrammar==0.1.19
 xxhash==3.5.0
 yarl==1.20.0
 zipp==3.22.0
+socksio==1.0.0

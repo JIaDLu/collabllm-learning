@@ -247,12 +247,12 @@ def main() -> None:
     ds_cfg = {
         "zero_optimization": {
             "stage": 2,
-            "overlap_comm": True,           # overlap gradient comms with backward pass
-            "reduce_bucket_size": "auto",
-            "allgather_bucket_size": "auto",
+            "overlap_comm": True,
+            "reduce_bucket_size": 500_000_000,
+            "allgather_bucket_size": 500_000_000,
             "contiguous_gradients": True,
-            "offload_optimizer": {"device": "none"},  # no CPU offload needed
-            "offload_param":    {"device": "none"},
+            "offload_optimizer": {"device": "none"},
+            "offload_param": {"device": "none"},
         },
         "gradient_clipping": "auto",
         "train_batch_size": "auto",
@@ -288,7 +288,8 @@ def main() -> None:
         do_eval=True,
         eval_strategy="steps",
         eval_steps=args.eval_steps,
-        save_strategy="epoch",
+        save_strategy="steps",
+        save_steps=args.eval_steps,
         save_total_limit=args.save_total_limit,
         metric_for_best_model="eval_loss",
         load_best_model_at_end=True,
