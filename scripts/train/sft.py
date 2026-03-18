@@ -35,6 +35,9 @@ class ProgressCallback(TrainerCallback):
         if logs is None:
             return
 
+        if not state.is_world_process_zero:
+            return
+
         epoch = state.epoch
         step = state.global_step
 
@@ -158,22 +161,36 @@ def main() -> None:
     os.makedirs(args.output_dir, exist_ok=True)
 
     local_rank = int(os.environ["LOCAL_RANK"])
-    dist.init_process_group(backend="nccl")
+    dist.init_process_group(
+        backend="nccl",
+        init_method="env://",
+    )
     torch.cuda.set_device(local_rank)
     dist.barrier()
 
     is_main = local_rank == 0
 
-    # Dataset
-    ds = MultiturnDataset(args.dataset_repo).to_sft_dataset(
-        eval_ratio=args.eval_ratio,
-        lower_bound_metric=args.lower_bound_metric,
-        lower_bound=args.lower_bound,
-    )
-
+    # -- Dataset ---------------------------------------------------------------
     if is_main:
+        logger.info("Loading and preprocessing dataset (main process only)...")
+
+        ds = MultiturnDataset(args.dataset_repo).to_sft_dataset(
+            eval_ratio=args.eval_ratio,
+            lower_bound_metric=args.lower_bound_metric,
+            lower_bound=args.lower_bound,
+        )
+
         logger.info(
             f"Dataset size -> train: {len(ds['train']):,} | eval: {len(ds['eval']):,}"
+        )
+
+    dist.barrier()
+
+    if not is_main:
+        ds = MultiturnDataset(args.dataset_repo).to_sft_dataset(
+            eval_ratio=args.eval_ratio,
+            lower_bound_metric=args.lower_bound_metric,
+            lower_bound=args.lower_bound,
         )
 
     # Model
@@ -185,6 +202,8 @@ def main() -> None:
             "offload_optimizer": {"device": "none"},
         },
         "bf16": {"enabled": True},
+        "train_micro_batch_size_per_gpu": args.per_device_train_batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
     }
 
     run_name = build_run_name(args)
@@ -214,8 +233,8 @@ def main() -> None:
 
     trainer = SFTTrainer(
         model=model,
-        train_dataset=ds["train"],
-        eval_dataset=ds["eval"],
+        train_dataset=ds["train"], # type: ignore
+        eval_dataset=ds["eval"], # type: ignore
         processing_class=tok,  # type: ignore
         args=train_cfg,
         callbacks=[ProgressCallback()],

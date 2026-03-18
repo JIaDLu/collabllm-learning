@@ -4,3 +4,4 @@ wandb
 .env
 *egg-info
 dist
+train.log
