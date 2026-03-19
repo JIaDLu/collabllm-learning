@@ -2,7 +2,8 @@ import os
 import logging
 from typing import List
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from collabllm.prompts import USER_SIMULATOR_PROMPT, COLLABLLM_TERMINATION_SIGNAL
 from collabllm.utils.template import parse_messages
@@ -10,8 +11,8 @@ from collabllm.utils.extract_json_reliable import extract_json
 
 logger = logging.getLogger(__name__)
 
-# Authenticate once at import time using the key from ~/.bashrc / environment.
-genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+# Build the client once at import time using the key from ~/.bashrc / environment.
+_client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
 
 
 class UserSimulator:
@@ -28,14 +29,12 @@ class UserSimulator:
         self.num_retries        = num_retries
         self.model_name         = llm_kwargs.pop("model")
 
-        # Gemini generation config — remaining llm_kwargs are passed through
-        # (temperature, max_output_tokens, top_p, …).
         # Rename max_tokens → max_output_tokens if the caller used the OpenAI key.
         if "max_tokens" in llm_kwargs:
             llm_kwargs.setdefault("max_output_tokens", llm_kwargs.pop("max_tokens"))
         llm_kwargs.setdefault("temperature", 1.0)
         llm_kwargs.setdefault("max_output_tokens", 1024)
-        self.generation_config = genai.types.GenerationConfig(**llm_kwargs)
+        self.gen_config = types.GenerateContentConfig(**llm_kwargs)
 
     def __call__(self, messages: List[dict]) -> str:
         prompt = USER_SIMULATOR_PROMPT.format(
@@ -45,13 +44,12 @@ class UserSimulator:
             terminal_signal=COLLABLLM_TERMINATION_SIGNAL,
         )
 
-        model = genai.GenerativeModel(self.model_name)
-
         for attempt in range(self.num_retries):
             try:
-                raw = model.generate_content(
-                    prompt,
-                    generation_config=self.generation_config,
+                raw = _client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=self.gen_config,
                 ).text
             except Exception as e:
                 logger.error(f"[UserSimulator] Gemini call failed (attempt {attempt}): {e}")
@@ -70,7 +68,8 @@ class UserSimulator:
                 return parsed["response"].strip()
 
             logger.error(
-                f"[UserSimulator] Unexpected keys {list(parsed.keys()) if isinstance(parsed, dict) else type(parsed)}"
+                f"[UserSimulator] Unexpected keys "
+                f"{list(parsed.keys()) if isinstance(parsed, dict) else type(parsed)}"
                 f" (attempt {attempt}) — retrying."
             )
 

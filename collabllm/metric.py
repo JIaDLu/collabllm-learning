@@ -3,7 +3,8 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from collabllm.prompts import EXTRACT_MULTITURN_COMPLETION_PROMPT
 from collabllm.utils.template import parse_messages
@@ -11,8 +12,8 @@ from collabllm.utils.extract_json_reliable import extract_json
 
 logger = logging.getLogger(__name__)
 
-# Authenticate once at import time using the key from ~/.bashrc / environment.
-genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+# Build the client once at import time using the key from ~/.bashrc / environment.
+_client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
 
 
 # --------------------------------------------------------------------------- #
@@ -20,17 +21,18 @@ genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 # --------------------------------------------------------------------------- #
 def _gemini_complete(model_name: str, prompt: str, **generation_kwargs) -> str:
     """
-    Single Gemini generate call. Shared by extractor and any metric that needs
-    an LLM-as-judge call. Renames `max_tokens` → `max_output_tokens` so callers
-    can use the familiar OpenAI key name.
+    Single Gemini generate call. Shared by the extractor and any LLM-based metric.
+    Renames `max_tokens` → `max_output_tokens` so callers can use the OpenAI key name.
     """
     if "max_tokens" in generation_kwargs:
         generation_kwargs.setdefault(
             "max_output_tokens", generation_kwargs.pop("max_tokens")
         )
-    config = genai.types.GenerationConfig(**generation_kwargs)
-    return genai.GenerativeModel(model_name).generate_content(
-        prompt, generation_config=config
+    config = types.GenerateContentConfig(**generation_kwargs)
+    return _client.models.generate_content(
+        model=model_name,
+        contents=prompt,
+        config=config,
     ).text
 
 
