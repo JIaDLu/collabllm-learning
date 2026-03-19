@@ -70,7 +70,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm import LLM, SamplingParams
 
 from collabllm.datasets.multiturn import MultiturnDataset
-from reward import multiturn_aware_reward        # local rewrite
+from collabllm.reward import multiturn_aware_reward        # local rewrite
 from examples.single_turn_ds import datasets_info
 from examples.metrics import *  # noqa: F401,F403
 

@@ -22,7 +22,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Sequence
 
 from collabllm.metric import SingleTurnOrChatMetric
-from collabllm.utils.template import strip_system_prompt
 from simulation import run_chat_simulation   # local rewrite
 
 logger = logging.getLogger(__name__)

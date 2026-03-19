@@ -56,8 +56,16 @@ gitpython==3.1.46
 google-auth==2.40.3
 google-genai==1.20.0
 googleapis-common-protos==1.70.0
+google-api-core==2.30.0
+google-ai-generativelanguage==0.6.15
+google-api-python-client==2.193.0
+google-auth-httplib2==0.3.0
+google-generativeai==0.8.6
 gradio_client==1.10.3
-grpcio==1.71.0
+grpcio==1.78.0
+grpcio-status==1.71.2
+httplib2==0.31.2
+proto-plus==1.27.1
 h11==0.16.0
 hf-xet==1.1.2
 hjson==3.1.0
@@ -150,7 +158,8 @@ prometheus_client==0.22.0
 prometheus-fastapi-instrumentator==7.1.0
 prompt_toolkit==3.0.51
 propcache==0.3.1
-protobuf==6.33.5
+protobuf==5.29.6
+uritemplate==4.2.0
 psutil==5.9.0
 ptyprocess==0.7.0
 pure_eval==0.2.3
