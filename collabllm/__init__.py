@@ -10,7 +10,6 @@ from __future__ import annotations
 import errno
 import logging
 import os
-from distutils.util import strtobool
 from pathlib import Path
 
 # --------------------------------------------------------------------------- #
@@ -28,6 +27,21 @@ __all__ = [
 # --------------------------------------------------------------------------- #
 # Utility: boolean env-var parser                                             #
 # --------------------------------------------------------------------------- #
+def strtobool (val):
+    """Convert a string representation of truth to true (1) or false (0).
+
+    True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
+    are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
+    'val' is anything else.
+    """
+    val = val.lower()
+    if val in ('y', 'yes', 't', 'true', 'on', '1'):
+        return 1
+    elif val in ('n', 'no', 'f', 'false', 'off', '0'):
+        return 0
+    else:
+        raise ValueError("invalid truth value %r" % (val,))
+    
 def _env_flag(name: str, default: str = "1") -> bool:
     """
     Convert an environment variable to bool.
@@ -70,44 +84,4 @@ else:
     _pkg_logger.addHandler(logging.NullHandler())
 
 
-# --------------------------------------------------------------------------- #
-# LiteLLM                                                                     #
-# --------------------------------------------------------------------------- #
-import litellm
 
-# Diable the cache by default, as it is not needed in most cases.
-litellm.disable_cache()
-
-# Also silence the LiteLLM logger.
-logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
-_pkg_logger.info("Disable LiteLLM cache and logging by default. ")
-
-# --------------------------------------------------------------------------- #
-# Per-user runtime directory                                                  #
-# --------------------------------------------------------------------------- #
-_DEFAULT_RUN_DIR = "/run/user/{uid}/collabllm"
-
-def _resolve_run_user_dir() -> Path:
-    # 1) honour explicit env-var
-    env_val = os.getenv("RUN_USER_DIR")
-    if env_val:
-        return Path(env_val).expanduser()
-
-    # 2) fall back to XDG-runtime-style path
-    return Path(_DEFAULT_RUN_DIR.format(uid=os.getuid()))
-
-RUN_USER_DIR: Path = _resolve_run_user_dir()
-os.environ["RUN_USER_DIR"] = str(RUN_USER_DIR) 
-
-try:
-    RUN_USER_DIR.mkdir(parents=True, exist_ok=True)
-except OSError as exc:
-    if exc.errno in {errno.EACCES, errno.ENOENT}:
-        fallback = Path.home() / ".cache" / "collabllm"
-        fallback.mkdir(parents=True, exist_ok=True)
-        _pkg_logger.warning(
-            "Cannot access %s; using %s instead.", RUN_USER_DIR, fallback
-        )
-        RUN_USER_DIR = fallback
-    else:
-        raise

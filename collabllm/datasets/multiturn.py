@@ -1,53 +1,3 @@
-"""
-collabllm.datasets.multiturn
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Unified loader + wrapper for multi-turn chat data.
-
-Initialization supports three input styles:
-
-1. **Flat list** (`List[dict]`) with required keys per row:
-   {'prompt', 'completion', 'conv_id', 'score',
-    'single_turn_prompt', 'single_turn_completion', 'single_turn_metadata'}
-
-2. **Nested structure** (`List[dict]`) per conversation:
-   [
-     {
-       "conv_id": ...,
-       "single_turn_prompt": ...,
-       "single_turn_completion": ...,
-       "single_turn_metadata": ...,
-       "turns": [
-         {
-           "prompt": [ {role,content}, ... ],
-           "responses": [
-             {"completion": ..., "score": ...},
-             {"completion": ..., "score": ...},
-             ...
-           ]
-         },
-         ...
-       ]
-     },
-     ...
-   ]
-
-3. **Local HF dataset directory** (path) or **HF Hub repo ID** (string).
-
-In all cases, the internal `self.data` will be a flat `List[dict]` with keys:
-{prompt, completion, conv_id, score, single_turn_prompt, single_turn_completion,
- single_turn_metadata, turn_id}
-
-Derived field
--------------
-• `turn_id` is set to `len(prompt)` if not provided explicitly.
-
-Converters (all use a uniform random splitter)
------------------------------------------------
-• `to_sft_dataset()`   → DatasetDict {text}  
-• `to_dpo_dataset()`   → DatasetDict {prompt, chosen, rejected, score_*}  
-• `to_inputs_dataset()`→ DatasetDict {prompt, single_turn_*}
-"""
-
 from __future__ import annotations
 
 import os
@@ -56,7 +6,6 @@ import numpy as np
 from typing import Any, Dict, List, Optional, Sequence, Union
 from collabllm.prompts import SYSTEM_PROMPT
 from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
-
 _REQUIRED: set[str] = {
     "prompt",
     "completion",
@@ -70,12 +19,10 @@ _REQUIRED: set[str] = {
 import logging
 logger = logging.getLogger(__name__)
 
-
 # --------------------------------------------------------------------------- #
 # uniform splitter                                                            #
 # --------------------------------------------------------------------------- #
-def _uniform_split(
-    full_ds: Dataset,
+def _uniform_split(full_ds: Dataset,
     *,
     eval_ratio: float,
     n_eval: Optional[int],
@@ -95,7 +42,6 @@ def _uniform_split(
         }
     )
 
-
 # --------------------------------------------------------------------------- #
 # main dataclass                                                              #
 # --------------------------------------------------------------------------- #
@@ -107,17 +53,6 @@ class MultiturnDataset:
         seed: int = 42,
         add_system_prompt: bool = True,
     ):
-        """
-        Parameters
-        ----------
-        data_or_local_dir_or_hf_repo_or_nested :
-            • Flat list of dicts with required keys (old style), OR
-            • Nested list of conversations (new style), OR
-            • Local path saved by `Dataset.save_to_disk`, OR
-            • HF Hub repo ID (e.g. "org/dataset").
-        seed : int
-            RNG seed for uniform splitting.
-        """
         self.seed = seed
         self.sys_msg = [{"role": "system", "content": SYSTEM_PROMPT}] if add_system_prompt else []
 
@@ -129,6 +64,22 @@ class MultiturnDataset:
             raw_list = [dict(r) for r in ds_dict.flatten()]
         else:
             ds_dict = load_dataset(str(data_or_local_dir_or_hf_repo_or_nested), trust_remote_code=True)  # type: ignore
+            '''
+            ds_dict:
+                    DatasetDict({
+                        train: Dataset({
+                            features: [ 'prompt', 'completion', 'conv_id', 'score', 
+                                        'single_turn_prompt', 'single_turn_completion', 'single_turn_metadata', 
+                                        'turn_id', 'sessions', 'rewards' ],
+                            num_rows: 1065
+                        })
+                    })        ds_dict是一个字典类容器  本质上是一个以“数据集划分名称”为键，以Dataset对象为值的字典
+                              Dataset 不是字典，是一个可迭代的行容器(List),每一个元素是每一行数据（每行是一个字典形式存储）
+
+            ds_dict.items()只有一个元素 [( 'train', Dataset({}) ), ]
+            for _, split in ds_dict.items() 这个只会遍历一次
+            for r in split 会遍历 1065 次   split是一个列表，依次返回每一行的数据（每行是一个字典）
+            '''
             raw_list = [dict(r) for _, split in ds_dict.items() for r in split]
 
         if not raw_list:
@@ -136,10 +87,11 @@ class MultiturnDataset:
 
         # 2) Detect nested structure: presence of "turns" key in first element
         if isinstance(raw_list[0], dict) and "turns" in raw_list[0]:
+            # 这是一个 conv_id 下面包含这一整场对话的所有轮次，这个函数会将它炸开。目的是让 PPO 模型能够学习在对话的任何一个阶段如何进行回复。
             self.data = self._flatten_nested(raw_list)
         else:
             # Assume flat structure; validate required keys
-            if not _REQUIRED.issubset(raw_list[0]):
+            if not _REQUIRED.issubset(raw_list[0]):   # issubset()作用是判断一个集合是否为另一个集合的子集
                 missing = _REQUIRED - set(raw_list[0])
                 raise ValueError(f"Missing required keys in flat data: {missing}")
 
@@ -151,40 +103,9 @@ class MultiturnDataset:
 
             self.data = raw_list  # type: ignore
 
+
         if not self.data:
             raise ValueError("No valid rows after processing input.")
-
-    def push_to_hub(
-        self,
-        repo_id: str,
-        *,
-        private: bool = False,
-        token: Optional[str] = None,
-        split: Optional[str] = None,
-    ) -> DatasetDict:
-
-        """
-        Push the dataset to the Hugging Face Hub.
-
-        Parameters
-        ----------
-        repo_id : str
-            The repository ID on the Hugging Face Hub.
-        private : bool
-            Whether to create a private repository.
-        token : Optional[str]
-            Optional authentication token for the Hub.
-        split : Optional[str]
-            If provided, will save only this split (e.g., "train", "eval").
-
-        Returns
-        -------
-        DatasetDict
-            The pushed dataset.
-        """
-        ds = Dataset.from_dict({k: [row[k] for row in self.data] for k in self.data[0]})
-        return ds.push_to_hub(repo_id, private=private, token=token, split=split)
-
 
     def _flatten_nested(self, nested: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -253,18 +174,15 @@ class MultiturnDataset:
                         }
                     )
         return flat
-
-    # ------------------------------------------------------------------ #
-    # SFT                                                                #
-    # ------------------------------------------------------------------ #
+    
     def to_sft_dataset(
-        self,
-        *,
-        n_eval: Optional[int] = None,
-        eval_ratio: Optional[float] = 0.0,
-        lower_bound_metric: Optional[str] = None,
-        lower_bound: Optional[float] = 0.0,
-    ) -> DatasetDict:
+            self,
+            *,
+            n_eval: Optional[int] = None,
+            eval_ratio: Optional[float] = 0.0,
+            lower_bound_metric: Optional[str] = None,
+            lower_bound: Optional[float] = 0.0,
+        ) -> DatasetDict:
 
         # Select best example per conversation ID: prefer latest turn, then highest score
         best_examples = {}
@@ -310,48 +228,7 @@ class MultiturnDataset:
 
         full_dataset = Dataset.from_dict({"messages": serialized_dialogues})
         return _uniform_split(full_dataset, eval_ratio=eval_ratio, n_eval=n_eval, seed=self.seed)
-
-    # ------------------------------------------------------------------ #
-    # DPO                                                                #
-    # ------------------------------------------------------------------ #
-    def to_dpo_dataset(
-        self,
-        *,
-        minimum_gap: float = 0.0,
-        n_eval: Optional[int] = None,
-        eval_ratio: Optional[float] = 0.0,
-    ) -> DatasetDict:
-
-        # Group rows by (conv_id, turn_id)
-        grouped: Dict[tuple, List[Dict[str, Any]]] = {}
-        for r in self.data:
-            grouped.setdefault((r["conv_id"], r["turn_id"]), []).append(r)
-
-        pairs = []
-        for items in grouped.values():
-            if len(items) < 2:
-                continue
-            items = sorted(items, key=lambda r: r["score"], reverse=True)
-            if items[0]["score"] - items[-1]["score"] < minimum_gap:
-                continue
-            pairs.append(
-                {
-                    "prompt": self.sys_msg + items[0]["prompt"],
-                    "chosen": items[0]["completion"],
-                    "rejected": items[-1]["completion"],
-                    "score_chosen": items[0]["score"],
-                    "score_rejected": items[-1]["score"],
-                }
-            )
-
-        logger.info(f"Converted {len(pairs)} pairs (minimum_gap={minimum_gap}, ratio={len(pairs)/len(self.data):.2f})")
-
-        if not pairs:
-            return DatasetDict({"train": Dataset.from_dict({}), "eval": Dataset.from_dict({})})
-
-        full_ds = Dataset.from_dict({k: [p[k] for p in pairs] for k in pairs[0]})
-        return _uniform_split(full_ds, eval_ratio=eval_ratio, n_eval=n_eval, seed=self.seed)
-
+    
     # ------------------------------------------------------------------ #
     # Inputs                                                             #
     # ------------------------------------------------------------------ #
@@ -363,24 +240,34 @@ class MultiturnDataset:
     ) -> DatasetDict:
 
         # Keep exactly one row per (conv_id, turn_id)
+        # 在python的type hints中，中括号专门用来表示“容器内部元素的类型”
         unique: Dict[tuple, Dict[str, Any]] = {}
-        for r in self.data:
+        for r in self.data:  # self.data  ->  [row_1(type: dict), row_2(type: dict), row_3(type: dict), ...]
             key = (r["conv_id"], r["turn_id"])
             if key not in unique:
                 unique[key] = r
             r['prompt'] = self.sys_msg + r["prompt"]
-
+        '''
+            在 DPO 或其他数据集中，对于同一个对话历史（conv_id + turn_id），
+            可能存在多条数据（例如一条“好”的回复，一条“坏”的回复）。 
+            但对于 PPO 生成 (Rollout) 来说，我们只需要这个对话历史（Prompt）本身。
+            我们不需要多条重复的 Prompt 让模型生成多次，因此这里强制对 (conv_id, turn_id) 进行去重，保留第一条。
+        '''
         keep_keys = [
             "prompt",
             "single_turn_prompt",
             "single_turn_completion",
             "single_turn_metadata",
         ]
-        records = [{k: row[k] for k in keep_keys} for row in unique.values()]
+        # 每一行数据都仅保留了这4个字段
+        records = [{k: row[k] for k in keep_keys} for row in unique.values()] # 去重后，拿所有的values 去重后的所有行
         if not records:
             return DatasetDict({"train": Dataset.from_dict({}), "eval": Dataset.from_dict({})})
 
+        # 从“行式存储”转为“列式存储”，Hugging Face 的 Dataset.from_dict 方法要求输入一个字典，其中 Key 是列名，Value 是包含该列所有数据的列表。这叫“列式存储” (Column-Oriented)。
         full_ds = Dataset.from_dict({k: [rec[k] for rec in records] for k in keep_keys})
+
+        # 最后，_uniform_split（代码中未显示但被调用）会将数据划分为训练集和验证集（这里 eval_ratio=0，所以全都是训练集）。
         return _uniform_split(full_ds, eval_ratio=eval_ratio, n_eval=n_eval, seed=self.seed)
 
     # ------------------------------------------------------------------ #

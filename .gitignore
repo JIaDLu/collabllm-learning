@@ -5,3 +5,4 @@ wandb
 *egg-info
 dist
 train.log
+.vscode
